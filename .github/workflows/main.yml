@@ -119,33 +119,37 @@ jobs:
       - name: Deploy in YC
         uses: appleboy/ssh-action@master
         with:
-           host: ${{ needs.job3.outputs.external_ip }}
-           username: ${{ secrets.VM_USER }}
-           key: ${{ secrets.VM_SSH_KEY }}
-           script: |
-              cd kittygram
-              
-              cat > .env <<EOF
-              POSTGRES_DB=${{ secrets.POSTGRES_DB }}
-              POSTGRES_USER=${{ secrets.POSTGRES_USER }}
-              POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-              POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
-              POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}
-              SECRET_KEY=${{ secrets.SECRET_KEY }}
-              DEBUG=${{ secrets.DEBUG }}
-              EOF
+            host: ${{ needs.job3.outputs.external_ip }}
+            username: ${{ secrets.VM_USER }}
+            key: ${{ secrets.VM_SSH_KEY }}
+            script: |
+                # Установка Docker и Compose на сервер
+                sudo apt-get update
+                sudo apt-get install -y docker.io docker-compose-v2
 
-              sudo docker compose -f docker-compose.production.yml pull
-              sudo docker compose -f docker-compose.production.yml down
-              sudo docker compose -f docker-compose.production.yml up -d --remove-orphans
-              
-              sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py migrate
-              sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py collectstatic
-              sudo docker compose -f docker-compose.production.yml exec backend_service mkdir -p /code/static/backend/
-              sudo docker compose -f docker-compose.production.yml exec backend_service cp -r /code/collected_static/. /code/static/backend/
-              
-              sudo docker compose -f docker-compose.production.yml exec frontend_service mkdir -p /app/static/frontend/
-              sudo docker compose -f docker-compose.production.yml exec frontend_service cp -r /app/build/. /app/static/frontend/
+                cd kittygram
+
+                cat > .env <<EOF
+                POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+                POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+                POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+                POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
+                POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}
+                SECRET_KEY=${{ secrets.SECRET_KEY }}
+                DEBUG=${{ secrets.DEBUG }}
+                EOF
+
+                sudo docker compose -f docker-compose.production.yml pull
+                sudo docker compose -f docker-compose.production.yml down
+                sudo docker compose -f docker-compose.production.yml up -d --remove-orphans
+
+                sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py migrate
+                sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py collectstatic
+                sudo docker compose -f docker-compose.production.yml exec backend_service mkdir -p /code/static/backend/
+                sudo docker compose -f docker-compose.production.yml exec backend_service cp -r /code/collected_static/. /code/static/backend/
+
+                sudo docker compose -f docker-compose.production.yml exec frontend_service mkdir -p /app/static/frontend/
+                sudo docker compose -f docker-compose.production.yml exec frontend_service cp -r /app/build/. /app/static/frontend/
 
   job5:
     name: Run autotests
