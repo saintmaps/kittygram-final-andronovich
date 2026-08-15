@@ -84,10 +84,10 @@ jobs:
               EOF
           - name: Terraform Init
             working-directory: ./infra
-            run: terraform init -backend-config="access_key=$AWS_ACCESS_KEY_ID" -backend-config="secret_key=$AWS_SECRET_ACCESS_KEY" -lock-timeout=15m
+            run: terraform init -backend-config="access_key=$AWS_ACCESS_KEY_ID" -backend-config="secret_key=$AWS_SECRET_ACCESS_KEY" -lock=false
           - name: Terraform Apply
             working-directory: ./infra
-            run: terraform apply -auto-approve  
+            run: terraform apply -auto-approve -lock=false
           - name: Terraform Output
             id: get_ip
             working-directory: ./infra
