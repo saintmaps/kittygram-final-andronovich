@@ -75,13 +75,12 @@ jobs:
               terraform_wrapper: false # Важно, чтобы вывод IP был чистым
           - name: Prepare Secrets
             working-directory: ./infra
+            env:
+                AUTHORIZED_KEY_JSON: ${{ secrets.AUTHORIZED_KEY_JSON  }}
+                TERRAFORM_TFVARS: ${{ secrets.TERRAFORM_TFVARS  }}
             run: |
-              cat <<'EOF' > ./authorized_key.json
-              ${{ secrets.AUTHORIZED_KEY_JSON }}
-              EOF
-              cat <<'EOF' > ./terraform.tfvars
-              ${{ secrets.TERRAFORM_TFVARS }}
-              EOF
+              echo "$AUTHORIZED_KEY_JSON" > ./authorized_key.json
+              echo "$TERRAFORM_TFVARS" > ./terraform.tfvars
           - name: Terraform Init
             working-directory: ./infra
             run: terraform init -backend-config="access_key=$AWS_ACCESS_KEY_ID" -backend-config="secret_key=$AWS_SECRET_ACCESS_KEY" -lock=false

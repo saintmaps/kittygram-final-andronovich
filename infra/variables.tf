@@ -41,7 +41,7 @@ variable "vm_name" {
 
 variable "vm_zone" {
   type    = string
-  default = "ru_central1-a"
+  default = "ru-central1-a"
 }
 
 variable "os_image_family" {
