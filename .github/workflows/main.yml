@@ -126,6 +126,7 @@ jobs:
                 set -e
 
                 cd kittygram
+                git pull
 
                 cat > .env <<EOF
                 POSTGRES_DB=${{ secrets.POSTGRES_DB }}
