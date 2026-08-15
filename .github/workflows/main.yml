@@ -154,8 +154,8 @@ jobs:
                 sudo docker compose -f docker-compose.production.yml exec backend mkdir -p /code/static/backend/
                 sudo docker compose -f docker-compose.production.yml exec backend cp -r /app/static/. /code/static/backend/
 
-                sudo docker compose -f docker-compose.production.yml exec frontend_service mkdir -p /app/static/frontend/
-                sudo docker compose -f docker-compose.production.yml exec frontend_service cp -r /app/build/. /app/static/frontend/
+                sudo docker compose -f docker-compose.production.yml exec frontend mkdir -p /app/static/frontend/
+                sudo docker compose -f docker-compose.production.yml exec frontend cp -r /app/build/. /app/static/frontend/
 
   job5:
     name: Run autotests
