@@ -143,6 +143,8 @@ jobs:
                 sudo docker compose -f docker-compose.production.yml down
                 sudo docker compose -f docker-compose.production.yml up -d --remove-orphans
 
+                sudo docker compose -f docker-compose.production.yml logs backend_service
+
                 sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py migrate
                 sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py collectstatic
                 sudo docker compose -f docker-compose.production.yml exec backend_service mkdir -p /code/static/backend/
