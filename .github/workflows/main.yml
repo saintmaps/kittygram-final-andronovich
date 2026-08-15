@@ -1,105 +1,197 @@
-name: Kittygram Workflow
+name: Main workflow
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
-  tests:
+  job1:
+    name: Run test
     runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    - name: Install flake8
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8==6.0.0 flake8-isort==6.0.0
+    - name: Run static test with flake8
+      run: |
+        python -m flake8 backend/
+
+  job2:
+      name: Push images to Hub
+      runs-on: ubuntu-latest
+      needs: job1
+      steps:
+        - name: Checkout repo
+          uses: actions/checkout@v3
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v2
+        - name: Login to Docker 
+          uses: docker/login-action@v2
+          with:
+            username: ${{ secrets.DOCKER_USERNAME }}
+            password: ${{ secrets.DOCKER_PASSWORD }}
+        - name: Push frontend
+          uses: docker/build-push-action@v4
+          with:
+            context: ./frontend/
+            push: true
+            tags: ${{ secrets.DOCKER_USERNAME }}/kittygram_frontend:latest
+        - name: Push backend
+          uses: docker/build-push-action@v4
+          with:
+            context: ./backend/
+            push: true
+            tags: ${{ secrets.DOCKER_USERNAME }}/kittygram_backend:latest
+        - name: Push gateway
+          uses: docker/build-push-action@v4
+          with:
+            context: ./nginx/
+            push: true
+            tags: ${{ secrets.DOCKER_USERNAME }}/kittygram_gateway:latest
+
+  job3:
+        name: Get IP from YC
+        runs-on: ubuntu-latest
+        needs: job1
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        outputs:
+          external_ip: ${{ steps.get_ip.outputs.ip }}
+        steps:
+          - name: Checkout repo
+            uses: actions/checkout@v3
+          - name: Setup Terraform
+            uses: hashicorp/setup-terraform@v2
+            with:
+              terraform_version: 1.14.8
+              terraform_wrapper: false # Важно, чтобы вывод IP был чистым
+          - name: Prepare Secrets
+            working-directory: ./infra
+            run: |
+              cat <<'EOF' > ./authorized_key.json
+              ${{ secrets.AUTHORIZED_KEY_JSON }}
+              EOF
+              cat <<'EOF' > ./terraform.tfvars
+              ${{ secrets.TERRAFORM_TFVARS }}
+              EOF
+          - name: Terraform Init
+            working-directory: ./infra
+            run: terraform init -backend-config="access_key=$AWS_ACCESS_KEY_ID" -backend-config="secret_key=$AWS_SECRET_ACCESS_KEY" -lock-timeout=15m
+          - name: Terraform Output
+            id: get_ip
+            working-directory: ./infra
+            run: |
+              ip=$(terraform output -raw external_ip)
+              echo "ip=$ip" >> $GITHUB_OUTPUT
+
+  job4:
+    name: Deploy in YC
+    runs-on: ubuntu-latest
+    needs:
+      - job2
+      - job3
     steps:
       - uses: actions/checkout@v3
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: 3.9
-      - name: Install dependencies
+      - name: Check that IP is not empty
         run: |
-          python -m pip install --upgrade pip
-          pip install flake8 pytest
-          pip install -r backend/requirements.txt
-      - name: Test with flake8
-        run: python -m flake8 backend
-        continue-on-error: true
-      - name: Test backend
-        run: |
-          pytest
-
-  build_and_push_to_docker_hub:
-    name: Push Docker images to Docker Hub
-    runs-on: ubuntu-latest
-    needs: tests
-    steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-      - name: Login to Docker
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-      
-      - name: Push backend to DockerHub
-        uses: docker/build-push-action@v4
-        with:
-          context: ./backend/
-          push: true
-          tags: saintmaps/kittygram_backend:latest
-
-      - name: Push frontend to DockerHub
-        uses: docker/build-push-action@v4
-        with:
-          context: ./frontend/
-          push: true
-          tags: saintmaps/kittygram_frontend:latest
-
-      - name: Push gateway to DockerHub
-        uses: docker/build-push-action@v4
-        with:
-          context: ./nginx/
-          push: true
-          tags: saintmaps/kittygram_gateway:latest
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build_and_push_to_docker_hub
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-      - name: Copy docker-compose.production.yml via ssh
+          if [ -z "${{ needs.job3.outputs.external_ip }}" ]; then
+            echo "IP is empty!"
+            exit 1
+          fi
+      - name: Copy compose to YC
         uses: appleboy/scp-action@master
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USER }}
-          key: ${{ secrets.SSH_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          host: ${{ needs.job3.outputs.external_ip }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
           source: "docker-compose.production.yml"
           target: "kittygram"
-      - name: Executing remote ssh commands to deploy
+      - name: Deploy in YC
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USER }}
-          key: ${{ secrets.SSH_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          script: |
-            cd kittygram
-            sudo docker compose -f docker-compose.production.yml pull
-            sudo docker compose -f docker-compose.production.yml down
-            sudo docker compose -f docker-compose.production.yml up -d
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py migrate
-            sudo docker compose -f docker-compose.production.yml exec backend python manage.py collectstatic --no-input
-            sudo docker compose -f docker-compose.production.yml exec backend cp -r /app/static_backend/. /app/static/
+           host: ${{ needs.job3.outputs.external_ip }}
+           username: ${{ secrets.VM_USER }}
+           key: ${{ secrets.VM_SSH_KEY }}
+           script: |
+              cd kittygram
+              
+              cat > .env <<EOF
+              POSTGRES_DB=${{ secrets.POSTGRES_DB }}
+              POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+              POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+              POSTGRES_HOST=${{ secrets.POSTGRES_HOST }}
+              POSTGRES_PORT=${{ secrets.POSTGRES_PORT }}
+              SECRET_KEY=${{ secrets.SECRET_KEY }}
+              DEBUG=${{ secrets.DEBUG }}
+              EOF
 
-  send_message:
+              sudo docker compose -f docker-compose.production.yml pull
+              sudo docker compose -f docker-compose.production.yml down
+              sudo docker compose -f docker-compose.production.yml up -d --remove-orphans
+              
+              sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py migrate
+              sudo docker compose -f docker-compose.production.yml exec backend_service python manage.py collectstatic
+              sudo docker compose -f docker-compose.production.yml exec backend_service mkdir -p /code/static/backend/
+              sudo docker compose -f docker-compose.production.yml exec backend_service cp -r /code/collected_static/. /code/static/backend/
+              
+              sudo docker compose -f docker-compose.production.yml exec frontend_service mkdir -p /app/static/frontend/
+              sudo docker compose -f docker-compose.production.yml exec frontend_service cp -r /app/build/. /app/static/frontend/
+
+  job5:
+    name: Run autotests
     runs-on: ubuntu-latest
-    needs: deploy
+    needs: job4
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: trial_user
+          POSTGRES_PASSWORD: trial_password
+          POSTGRES_DB: trial
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
     steps:
-      - name: Send message
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_TO }}
-          token: ${{ secrets.TELEGRAM_TOKEN }}
-          message: Деплой Kittygram успешно выполнен!
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v4
+      with:
+        python-version: 3.9
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r ./backend/requirements.txt
+    - name: Run automatic tests
+      env:
+        POSTGRES_USER: trial_user
+        POSTGRES_PASSWORD: trial_password
+        POSTGRES_DB: trial
+        DB_HOST: 127.0.0.1
+        DB_PORT: 5432
+      run: |
+        pytest tests/
+
+  job6:
+    runs-on: ubuntu-latest
+    name: Notify in Telegram
+    needs: job5
+    steps:
+    - name: Send message
+      uses: appleboy/telegram-action@master
+      with:
+        to: ${{ secrets.TELEGRAM_TO }}
+        token: ${{ secrets.TELEGRAM_TOKEN }}
+        message: |
+          Деплой успешно выполнен!
+          
+          Автор: ${{ github.actor }}
+          Коммит: ${{ github.event.head_commit.message }}
+          Ссылка на коммит:
+          https://github.com/${{ github.repository }}/commit/${{ github.sha }}

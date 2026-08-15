@@ -1,0 +1,74 @@
+name: Terraform
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action"
+        required: true
+        default: "plan"
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+          - show
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.14.8
+          terraform_wrapper: false # Важно, чтобы вывод следующих команд был чистым
+      - name: Prepare secrets
+        working-directory: ./infra
+        run: |
+          cat <<'EOF' > authorized_key.json
+          ${{ secrets.AUTHORIZED_KEY_JSON }}
+          EOF
+          cat <<'EOF' > terraform.tfvars
+          ${{ secrets.TERRAFORM_TFVARS }}
+          EOF
+      - name: Terraform Init
+        working-directory: ./infra
+        run: |
+          terraform init -reconfigure -lock-timeout=15m \
+            -backend-config="access_key=$AWS_ACCESS_KEY_ID" \
+            -backend-config="secret_key=$AWS_SECRET_ACCESS_KEY"
+      - name: Terraform Validate
+        working-directory: ./infra
+        run: terraform validate
+
+      - name: Terraform Plan
+        if: ${{ github.event.inputs.action == 'plan' }}
+        working-directory: ./infra
+        run: terraform plan -lock-timeout=15m -no-color | tee result.txt
+
+      - name: Terraform Apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        working-directory: ./infra
+        run: terraform apply -auto-approve -lock-timeout=15m -no-color | tee result.txt
+
+      - name: Terraform Destroy
+        if: ${{ github.event.inputs.action == 'destroy' }}
+        working-directory: ./infra
+        run: terraform destroy -auto-approve -lock-timeout=15m -no-color | tee result.txt
+
+      - name: Terraform Show
+        if: ${{ github.event.inputs.action == 'show' }}
+        working-directory: ./infra
+        run: terraform show -no-color | tee result.txt
+      
+      - name: Upload terraform artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform_${{ github.event.inputs.action }}_${{ github.run_id }}
+          path: ./infra/result.txt
